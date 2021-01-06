@@ -1,0 +1,17 @@
+[package]
+name = "panda-loader"
+version = "0.1.0"
+authors = ["Michael Melanson <michael@michaelmelanson.net>"]
+edition = "2018"
+
+[dependencies]
+panda-loader-lib = { path = "../panda-loader-lib" }
+uefi = { version = "0.7.0", features=['alloc'] }
+uefi-services = { version = "*", features=['alloc'] }
+log = { version = "0.4.11", default-features = false }
+fontdue = "0.4.0"
+spin = "0.7.0"
+
+[dependencies.conquer-once]
+version = "0.3.2"
+default-features = false

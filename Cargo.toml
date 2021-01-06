@@ -1,0 +1,19 @@
+[workspace]
+members = [
+  "panda-loader",
+  "panda-kernel",
+  "panda-loader-lib"
+]
+
+[patch.crates-io.uefi]
+path ="../extern/uefi-rs"
+default-features = false
+features=['alloc']
+
+[patch.crates-io.uefi-services]
+path = "../extern/uefi-rs/uefi-services"
+default-features = false
+features=['alloc'] 
+
+[patch.crates-io.fontdue]
+path = "../extern/fontdue"

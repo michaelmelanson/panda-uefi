@@ -1,0 +1,11 @@
+[package]
+name = "panda-kernel"
+version = "0.1.0"
+authors = ["Michael Melanson <michael@michaelmelanson.net>"]
+edition = "2018"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+"panda-loader-lib" = { path = "../panda-loader-lib" }
