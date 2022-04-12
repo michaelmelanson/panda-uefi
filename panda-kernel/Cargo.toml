@@ -5,7 +5,15 @@ authors = ["Michael Melanson <michael@michaelmelanson.net>"]
 edition = "2018"
 
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["bin"]
 
 [dependencies]
 "panda-loader-lib" = { path = "../panda-loader-lib" }
+spin = "0.9"
+fontdue = { version = "0.7.2", default-features = false }
+uart_16550 = { version = "0.2" }
+x86_64 = "*"
+
+[dependencies.conquer-once]
+version = "0.3.2"
+default-features = false

@@ -1,34 +1,58 @@
 #![no_std]
 #![no_main]
 #![feature(abi_efiapi)]
+#![feature(panic_info_message)]
+#![feature(alloc_error_handler)]
+#![feature(lang_items)]
+#![feature(int_roundings)]
+#![feature(iter_collect_into)]
+#![feature(alloc_layout_extra)]
 extern crate alloc;
 
-mod display;
+mod loader;
 mod logging;
+mod panic;
 
-use alloc::{string::ToString, vec::Vec};
-use display::{FontSize, FontStyle, TextPart};
-use uefi::prelude::*;
+use core::{alloc::Layout, pin::Pin};
 
-#[entry]
-fn uefi_start(handle: Handle, system_table: SystemTable<Boot>) -> Status {
-    uefi_services::init(&system_table).expect_success("Failed to initialize utils");
+use alloc::{vec, vec::Vec};
+use panda_loader_lib::{FrameBuffer, LoaderCarePackage, PixelFormat};
+use uefi::{
+    prelude::*,
+    proto::{
+        console::gop::{self, GraphicsOutput},
+        media::{
+            file::{File, FileAttribute, FileInfo, FileMode, FileType},
+            fs::SimpleFileSystem,
+        },
+    },
+    table::boot::{AllocateType, MemoryDescriptor, MemoryType},
+    CStr16,
+};
+use x86_64::{
+    registers::control::Cr3,
+    structures::paging::{
+        FrameAllocator, Mapper, OffsetPageTable, Page, PageSize, PageTable, PageTableFlags,
+        PhysFrame, Size2MiB, Size4KiB,
+    },
+    PhysAddr, VirtAddr,
+};
 
-    // reset console before doing anything else
-    system_table
-        .stdout()
-        .reset(false)
-        .expect_success("Failed to reset output buffer");
+const PHYSICAL_MEMORY_VIRTUAL_BASE: VirtAddr = unsafe { VirtAddr::new_unsafe(0x000000000) };
 
-    display::init(&system_table);
+struct BootResult {
+    mmap_buf: Vec<u8>,
+    memory_map: Vec<MemoryDescriptor>,
+    entry_point: VirtAddr,
+    loader_care_package: LoaderCarePackage,
+}
 
-    display::write_text(TextPart(
-        "Panda\n".to_string(),
-        FontSize::Large,
-        FontStyle::Bold,
-    ));
+fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResult, uefi::Error> {
+    unsafe {
+        uefi::alloc::init(system_table.boot_services());
+    }
 
-    logging::init().unwrap();
+    logging::init(&system_table).unwrap();
 
     // Print out UEFI revision number
     {
@@ -38,13 +62,231 @@ fn uefi_start(handle: Handle, system_table: SystemTable<Boot>) -> Status {
         log::info!("Booted by UEFI {}.{}!", major, minor);
     }
 
-    log::info!("Exiting boot services...");
+    let mut frame_allocator = ArenaFrameAllocator::from_uefi(&system_table, 5000)?;
+    let load_result = {
+        let fs = system_table
+            .boot_services()
+            .locate_protocol::<SimpleFileSystem>()?;
+        let fs = unsafe { &mut *fs.get() };
+
+        let mut volume = fs.open_volume().expect("Could not find volume");
+        let mut buf = [0u16; 1024];
+        let kernel_file = volume.open(
+            CStr16::from_str_with_buf("\\EFI\\kernel.elf", &mut buf).unwrap(),
+            FileMode::Read,
+            FileAttribute::empty(),
+        )?;
+
+        let mut kernel_file = if let FileType::Regular(kernel_file) = kernel_file.into_type()? {
+            kernel_file
+        } else {
+            panic!("Kernel image is not a file");
+        };
+
+        log::info!("Found kernel image");
+
+        let mut kernel_image_info_buf = vec![0; 102];
+        let kernel_image_info = kernel_file
+            .get_info::<FileInfo>(&mut kernel_image_info_buf)
+            .expect("Could not get kernel image file info");
+
+        let (kernel_image_base, mut kernel_image) = unsafe {
+            let length = kernel_image_info.file_size() as usize;
+            let layout = Layout::new::<u8>()
+                .repeat_packed(length)
+                .unwrap()
+                .align_to(Size4KiB::SIZE as usize)
+                .unwrap();
+            let ptr = alloc::alloc::alloc(layout) as *mut u8;
+            let slice = core::slice::from_raw_parts_mut(ptr, length);
+
+            (ptr as usize, Pin::static_mut(slice))
+        };
+
+        let bytes_read = kernel_file
+            .read(&mut kernel_image[..])
+            .expect("could not read kernel image");
+        log::info!("Read {} bytes of kernel image", bytes_read);
+
+        let kernel_object =
+            goblin::Object::parse(&kernel_image[..]).expect("Could not parse kernel image");
+
+        let load_result = loader::load_binary(
+            &*kernel_image,
+            &kernel_object,
+            PhysAddr::new(kernel_image_base as u64),
+            &mut frame_allocator,
+        );
+
+        load_result
+    };
+
+    let frame_buffer = framebuffer_from_uefi(&system_table)?;
+    let mmap_size = system_table.boot_services().memory_map_size();
     let mut mmap_buf = Vec::new();
-    mmap_buf.resize(system_table.boot_services().memory_map_size(), 0);
+    mmap_buf.resize(mmap_size.map_size * 2, 0);
+    let mut memory_map = Vec::<MemoryDescriptor>::with_capacity(mmap_size.map_size);
 
-    system_table
-        .exit_boot_services(handle, &mut mmap_buf)
-        .expect_success("Could not exit boot services");
+    println!("Exiting boot services...");
 
-    loop {}
+    let (_system_table, memory_map_iter) =
+        system_table.exit_boot_services(handle, &mut mmap_buf)?;
+    uefi::alloc::exit_boot_services();
+    logging::exit_boot_services();
+
+    println!("Boot services exited, copying memory map...");
+    memory_map_iter.copied().collect_into(&mut memory_map);
+
+    log::info!("Memory map:");
+    for descriptor in &memory_map {
+        log::info!(
+            "   {phys_start:#012X}..{phys_end:#012X} ({size_mb:3}MB) {ty:?}",
+            ty = descriptor.ty,
+            phys_start = descriptor.phys_start,
+            phys_end = descriptor.phys_start + (descriptor.page_count * 4096),
+            size_mb = (descriptor.page_count * 4096) / 1024 / 1024,
+        );
+    }
+
+    let level_4_table = unsafe {
+        let (cr3, _) = Cr3::read();
+        &mut *(cr3.start_address().as_u64() as *mut PageTable)
+    };
+
+    let mut mapper = unsafe { OffsetPageTable::new(level_4_table, PHYSICAL_MEMORY_VIRTUAL_BASE) };
+
+    for mapping in &load_result.mappings {
+        let mut flags = PageTableFlags::PRESENT;
+
+        if mapping.writable {
+            flags |= PageTableFlags::WRITABLE;
+        }
+
+        // if !mapping.executable {
+        //     flags |= PageTableFlags::NO_EXECUTE;
+        // }
+
+        unsafe {
+            let page = Page::<Size2MiB>::from_start_address(mapping.virt_addr).unwrap();
+
+            mapper.unmap(page).expect("Could not unmap page").1.flush();
+            mapper
+                .map_to(page, mapping.phys_frame, flags, &mut frame_allocator)
+                .unwrap()
+                .flush();
+
+            println!("  Mapped {page:?} to {phys:?}", phys = mapping.phys_frame);
+        }
+    }
+
+    let entry_point = load_result.entry_point.clone();
+    core::mem::forget(load_result);
+
+    let loader_care_package = LoaderCarePackage { frame_buffer };
+
+    println!("UEFI boot successful");
+    Ok(BootResult {
+        mmap_buf,
+        memory_map,
+        entry_point,
+        loader_care_package,
+    })
+}
+
+fn framebuffer_from_uefi(system_table: &SystemTable<Boot>) -> Result<FrameBuffer, uefi::Error> {
+    let gop = system_table
+        .boot_services()
+        .locate_protocol::<GraphicsOutput>()?;
+    let gop = unsafe { &mut *gop.get() };
+    let current_mode_info = gop.current_mode_info().clone();
+    let mut frame_buffer = gop.frame_buffer();
+
+    Ok(FrameBuffer {
+        base_addr: frame_buffer.as_mut_ptr() as usize,
+        resolution: current_mode_info.resolution(),
+        stride: current_mode_info.stride(),
+        pixel_format: match current_mode_info.pixel_format() {
+            gop::PixelFormat::Rgb => PixelFormat::RGB,
+            gop::PixelFormat::Bgr => PixelFormat::BGR,
+            gop::PixelFormat::Bitmask => todo!(),
+            gop::PixelFormat::BltOnly => todo!(),
+        },
+    })
+}
+
+#[entry]
+fn uefi_start(handle: Handle, system_table: SystemTable<Boot>) -> Status {
+    match uefi_boot(handle, system_table) {
+        Ok(BootResult {
+            mmap_buf,
+            memory_map,
+            entry_point,
+            mut loader_care_package,
+        }) => {
+            println!("Kernel loaded successfully with entry point {entry_point:X}");
+
+            let entry_point_code = unsafe {
+                core::slice::from_raw_parts(entry_point.as_u64() as usize as *mut u8, 0x10)
+            };
+            println!("Entry point code: {:?}", entry_point_code);
+
+            let start = unsafe {
+                core::mem::transmute::<usize, fn(LoaderCarePackage)>(entry_point.as_u64() as usize)
+            };
+
+            println!("Calling kernel entry point {:#X?}...", start);
+
+            loader_care_package
+                .frame_buffer
+                .draw_pixel((0, 0), (0, 255, 0));
+            start(loader_care_package);
+            panic!("Kernel returned");
+        }
+        Err(error) => {
+            println!("UEFI boot failed: {:?}", error);
+            error.status()
+        }
+    }
+}
+
+struct ArenaFrameAllocator {
+    start_addr: PhysAddr,
+    end_addr: PhysAddr,
+    next_addr: PhysAddr,
+}
+
+impl ArenaFrameAllocator {
+    fn new(start_addr: PhysAddr, end_addr: PhysAddr) -> Self {
+        Self {
+            start_addr,
+            end_addr,
+            next_addr: start_addr,
+        }
+    }
+
+    fn from_uefi(system_table: &SystemTable<Boot>, pages: usize) -> Result<Self, uefi::Error> {
+        let start_addr = system_table.boot_services().allocate_pages(
+            AllocateType::AnyPages,
+            MemoryType::LOADER_DATA,
+            pages,
+        )?;
+
+        let start_addr = PhysAddr::new(start_addr);
+        let end_addr = start_addr + (pages * 4096);
+
+        Ok(Self::new(start_addr, end_addr))
+    }
+}
+
+unsafe impl<S: PageSize> FrameAllocator<S> for ArenaFrameAllocator {
+    fn allocate_frame(&mut self) -> Option<PhysFrame<S>> {
+        if self.next_addr >= self.end_addr {
+            log::error!("ArenaFrameAllocator exhausted");
+            None
+        } else {
+            let frame = PhysFrame::containing_address(self.next_addr);
+            self.next_addr += S::SIZE;
+            Some(frame)
+        }
+    }
 }
