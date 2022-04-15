@@ -22,5 +22,5 @@
   "position-independent-executables": true,
   "exe-suffix": ".efi",
   "is-like-windows": true,
-  "emit-debug-gdb-scripts": false
+  "emit-debug-gdb-scripts": true,
 }

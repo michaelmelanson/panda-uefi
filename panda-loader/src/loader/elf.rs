@@ -11,7 +11,6 @@ use crate::loader::{FrameMapping, LoadResult};
 pub fn load_elf_binary<S: PageSize, A: FrameAllocator<S>>(
     file: &[u8],
     binary: &Elf,
-    base_addr: PhysAddr,
     frame_allocator: &mut A,
 ) -> LoadResult<S> {
     log::info!("Entry point at {:#X}", binary.entry);

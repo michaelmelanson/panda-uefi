@@ -16,7 +16,10 @@ mod panic;
 use core::{alloc::Layout, pin::Pin};
 
 use alloc::{vec, vec::Vec};
-use panda_loader_lib::{FrameBuffer, LoaderCarePackage, PixelFormat};
+use panda_loader_lib::{
+    FrameBuffer, KernelEntryFn, LoaderCarePackage, MemoryDescriptor, MemoryDescriptorType,
+    PixelFormat,
+};
 use uefi::{
     prelude::*,
     proto::{
@@ -26,7 +29,7 @@ use uefi::{
             fs::SimpleFileSystem,
         },
     },
-    table::boot::{AllocateType, MemoryDescriptor, MemoryType},
+    table::boot::{AllocateType, MemoryDescriptor as UefiMemoryDescriptor, MemoryType},
     CStr16,
 };
 use x86_64::{
@@ -42,7 +45,6 @@ const PHYSICAL_MEMORY_VIRTUAL_BASE: VirtAddr = unsafe { VirtAddr::new_unsafe(0x0
 
 struct BootResult {
     mmap_buf: Vec<u8>,
-    memory_map: Vec<MemoryDescriptor>,
     entry_point: VirtAddr,
     loader_care_package: LoaderCarePackage,
 }
@@ -90,7 +92,7 @@ fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResu
             .get_info::<FileInfo>(&mut kernel_image_info_buf)
             .expect("Could not get kernel image file info");
 
-        let (kernel_image_base, mut kernel_image) = unsafe {
+        let mut kernel_image = unsafe {
             let length = kernel_image_info.file_size() as usize;
             let layout = Layout::new::<u8>()
                 .repeat_packed(length)
@@ -100,7 +102,7 @@ fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResu
             let ptr = alloc::alloc::alloc(layout) as *mut u8;
             let slice = core::slice::from_raw_parts_mut(ptr, length);
 
-            (ptr as usize, Pin::static_mut(slice))
+            Pin::static_mut(slice)
         };
 
         let bytes_read = kernel_file
@@ -111,12 +113,7 @@ fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResu
         let kernel_object =
             goblin::Object::parse(&kernel_image[..]).expect("Could not parse kernel image");
 
-        let load_result = loader::load_binary(
-            &*kernel_image,
-            &kernel_object,
-            PhysAddr::new(kernel_image_base as u64),
-            &mut frame_allocator,
-        );
+        let load_result = loader::load_binary(&*kernel_image, &kernel_object, &mut frame_allocator);
 
         load_result
     };
@@ -131,22 +128,24 @@ fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResu
 
     let (_system_table, memory_map_iter) =
         system_table.exit_boot_services(handle, &mut mmap_buf)?;
+
+    // if you get a memory error here, it's probably because something
+    // allocated above is being deallocated below, when the allocator has been dropped.
     uefi::alloc::exit_boot_services();
     logging::exit_boot_services();
 
     println!("Boot services exited, copying memory map...");
-    memory_map_iter.copied().collect_into(&mut memory_map);
-
-    log::info!("Memory map:");
-    for descriptor in &memory_map {
-        log::info!(
-            "   {phys_start:#012X}..{phys_end:#012X} ({size_mb:3}MB) {ty:?}",
-            ty = descriptor.ty,
-            phys_start = descriptor.phys_start,
-            phys_end = descriptor.phys_start + (descriptor.page_count * 4096),
-            size_mb = (descriptor.page_count * 4096) / 1024 / 1024,
-        );
-    }
+    memory_map_iter
+        .map(|descriptor| MemoryDescriptor {
+            base_addr: PhysAddr::new(descriptor.phys_start),
+            length: descriptor.page_count * Size4KiB::SIZE,
+            memory_type: match descriptor.ty {
+                MemoryType::CONVENTIONAL => MemoryDescriptorType::Available,
+                MemoryType::ACPI_RECLAIM => MemoryDescriptorType::AcpiReclaimable,
+                _ => MemoryDescriptorType::Reserved,
+            },
+        })
+        .collect_into(&mut memory_map);
 
     let level_4_table = unsafe {
         let (cr3, _) = Cr3::read();
@@ -182,12 +181,12 @@ fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResu
     let entry_point = load_result.entry_point.clone();
     core::mem::forget(load_result);
 
-    let loader_care_package = LoaderCarePackage { frame_buffer };
+    let loader_care_package =
+        LoaderCarePackage::new(frame_buffer, memory_map, PHYSICAL_MEMORY_VIRTUAL_BASE);
 
     println!("UEFI boot successful");
     Ok(BootResult {
         mmap_buf,
-        memory_map,
         entry_point,
         loader_care_package,
     })
@@ -219,26 +218,13 @@ fn uefi_start(handle: Handle, system_table: SystemTable<Boot>) -> Status {
     match uefi_boot(handle, system_table) {
         Ok(BootResult {
             mmap_buf,
-            memory_map,
             entry_point,
-            mut loader_care_package,
+            ref mut loader_care_package,
         }) => {
             println!("Kernel loaded successfully with entry point {entry_point:X}");
 
-            let entry_point_code = unsafe {
-                core::slice::from_raw_parts(entry_point.as_u64() as usize as *mut u8, 0x10)
-            };
-            println!("Entry point code: {:?}", entry_point_code);
+            let start = unsafe { core::mem::transmute::<u64, KernelEntryFn>(entry_point.as_u64()) };
 
-            let start = unsafe {
-                core::mem::transmute::<usize, fn(LoaderCarePackage)>(entry_point.as_u64() as usize)
-            };
-
-            println!("Calling kernel entry point {:#X?}...", start);
-
-            loader_care_package
-                .frame_buffer
-                .draw_pixel((0, 0), (0, 255, 0));
             start(loader_care_package);
             panic!("Kernel returned");
         }
@@ -250,7 +236,6 @@ fn uefi_start(handle: Handle, system_table: SystemTable<Boot>) -> Status {
 }
 
 struct ArenaFrameAllocator {
-    start_addr: PhysAddr,
     end_addr: PhysAddr,
     next_addr: PhysAddr,
 }
@@ -258,7 +243,6 @@ struct ArenaFrameAllocator {
 impl ArenaFrameAllocator {
     fn new(start_addr: PhysAddr, end_addr: PhysAddr) -> Self {
         Self {
-            start_addr,
             end_addr,
             next_addr: start_addr,
         }

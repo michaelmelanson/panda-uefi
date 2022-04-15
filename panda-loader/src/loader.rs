@@ -20,17 +20,10 @@ pub struct LoadResult<S: PageSize> {
 pub fn load_binary<S: PageSize>(
     file: &[u8],
     object: &goblin::Object,
-    base_addr: PhysAddr,
     frame_allocator: &mut impl FrameAllocator<S>,
 ) -> LoadResult<S> {
-    if !base_addr.is_aligned(Size4KiB::SIZE) {
-        panic!("Base address must be page aligned");
-    }
-
     match object {
-        goblin::Object::Elf(binary) => {
-            elf::load_elf_binary(file, binary, base_addr, frame_allocator)
-        }
+        goblin::Object::Elf(binary) => elf::load_elf_binary(file, binary, frame_allocator),
         goblin::Object::PE(_) => unimplemented!("PE kernel"),
         goblin::Object::Mach(_) => unimplemented!("Mach kernel"),
         goblin::Object::Archive(_) => unimplemented!("Archive kernel"),

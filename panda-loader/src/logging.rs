@@ -58,7 +58,7 @@ pub fn exit_boot_services() {
 }
 
 impl log::Log for ConsoleLogger {
-    fn enabled(&self, metadata: &log::Metadata) -> bool {
+    fn enabled(&self, _metadata: &log::Metadata) -> bool {
         true // metadata.level() >= log::Level::Info
     }
 
