@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 
 pub use frame_buffer::{FrameBuffer, PixelFormat};
 pub use memory_descriptor::{MemoryDescriptor, MemoryDescriptorType};
-use x86_64::VirtAddr;
+use x86_64::{PhysAddr, VirtAddr};
 
 pub type KernelEntryFn = extern "win64" fn(&LoaderCarePackage);
 
@@ -25,6 +25,7 @@ pub struct LoaderCarePackage {
     pub frame_buffer: FrameBuffer,
     pub memory_map: Vec<MemoryDescriptor>,
     pub phys_memory_virt_offset: VirtAddr,
+    pub rsdp_address: Option<PhysAddr>,
 }
 
 impl LoaderCarePackage {
@@ -32,12 +33,14 @@ impl LoaderCarePackage {
         frame_buffer: FrameBuffer,
         memory_map: Vec<MemoryDescriptor>,
         phys_memory_virt_offset: VirtAddr,
+        rsdp_address: Option<PhysAddr>,
     ) -> Self {
         LoaderCarePackage {
             magic_number: CARE_PACKAGE_MAGIC_NUMBER,
             frame_buffer,
             memory_map,
             phys_memory_virt_offset,
+            rsdp_address,
         }
     }
 

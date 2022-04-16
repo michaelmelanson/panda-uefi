@@ -11,8 +11,8 @@ pub enum FontSize {
 impl FontSize {
     pub fn size(&self) -> f32 {
         match self {
-            FontSize::Regular => 13.0,
-            FontSize::Large => 18.0,
+            FontSize::Regular => 14.0,
+            FontSize::Large => 24.0,
         }
     }
 
@@ -51,17 +51,17 @@ impl Display {
     pub fn new(frame_buffer: FrameBuffer) -> Display {
         let fonts = [
             Font::from_bytes(
-                include_bytes!("../../fonts/FiraSans-Light.ttf") as &[u8],
+                include_bytes!("../../fonts/Roboto-Light.ttf") as &[u8],
                 FontSettings::default(),
             )
             .unwrap(),
             Font::from_bytes(
-                include_bytes!("../../fonts/FiraSans-LightItalic.ttf") as &[u8],
+                include_bytes!("../../fonts/Roboto-LightItalic.ttf") as &[u8],
                 FontSettings::default(),
             )
             .unwrap(),
             Font::from_bytes(
-                include_bytes!("../../fonts/FiraSans-Bold.ttf") as &[u8],
+                include_bytes!("../../fonts/Roboto-Bold.ttf") as &[u8],
                 FontSettings::default(),
             )
             .unwrap(),
@@ -166,9 +166,9 @@ pub fn init(frame_buffer: FrameBuffer) {
 }
 
 pub fn clear_screen() {
-    DISPLAY.get().unwrap().lock().clear_screen();
+    DISPLAY.get().map(|display| display.lock().clear_screen());
 }
 
 pub fn write_text(text: TextPart) {
-    DISPLAY.get().unwrap().lock().write_text(text);
+    DISPLAY.get().map(|display| display.lock().write_text(text));
 }

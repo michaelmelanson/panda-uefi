@@ -10,7 +10,7 @@ use x86_64::{
         FrameAllocator, Mapper, OffsetPageTable, Page, PageSize, PageTable, PageTableFlags,
         PhysFrame, Size2MiB, Size4KiB,
     },
-    VirtAddr,
+    PhysAddr, VirtAddr,
 };
 
 use self::frame_allocator::PhysicalAllocator;
@@ -59,6 +59,15 @@ pub unsafe fn page_mapper() -> OffsetPageTable<'static> {
 
 pub fn allocate_frame() -> Option<PhysFrame> {
     unsafe { FRAME_ALLOCATOR.allocate_frame() }
+}
+
+pub fn physical_to_virtual(physical_address: PhysAddr) -> VirtAddr {
+    unsafe { VirtAddr::new(physical_address.as_u64() + PHYSICAL_MEMORY_VIRTUAL_BASE.as_u64()) }
+}
+
+pub unsafe fn physical_memory_ref<T>(physical_address: PhysAddr) -> &'static mut T {
+    let virtual_address = physical_to_virtual(physical_address);
+    &mut *virtual_address.as_mut_ptr()
 }
 
 pub fn map_page_to_frame(page: Page, frame: PhysFrame) -> Result<(), MemoryError> {

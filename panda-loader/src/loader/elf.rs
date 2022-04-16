@@ -13,7 +13,7 @@ pub fn load_elf_binary<S: PageSize, A: FrameAllocator<S>>(
     binary: &Elf,
     frame_allocator: &mut A,
 ) -> LoadResult<S> {
-    log::info!("Entry point at {:#X}", binary.entry);
+    log::debug!("Entry point at {:#X}", binary.entry);
 
     let mut mappings = Vec::new();
 

@@ -31,6 +31,7 @@ use uefi::{
     },
     table::{
         boot::{AllocateType, MemoryType},
+        cfg::ACPI2_GUID,
         runtime::ResetType,
         Runtime,
     },
@@ -122,6 +123,21 @@ fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResu
         load_result
     };
 
+    let mut rsdp_address = None;
+
+    for table in system_table.config_table() {
+        match table.guid {
+            ACPI2_GUID => {
+                log::debug!(
+                    "Found ACPI 2.0 RSDP table at {address:X}",
+                    address = table.address as usize
+                );
+                rsdp_address = Some(PhysAddr::new(table.address as u64))
+            }
+            _ => {}
+        }
+    }
+
     let frame_buffer = framebuffer_from_uefi(&system_table)?;
     let mmap_size = system_table.boot_services().memory_map_size();
     let mut mmap_buf = Vec::new();
@@ -185,8 +201,12 @@ fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResu
     let entry_point = load_result.entry_point.clone();
     core::mem::forget(load_result);
 
-    let loader_care_package =
-        LoaderCarePackage::new(frame_buffer, memory_map, PHYSICAL_MEMORY_VIRTUAL_BASE);
+    let loader_care_package = LoaderCarePackage::new(
+        frame_buffer,
+        memory_map,
+        PHYSICAL_MEMORY_VIRTUAL_BASE,
+        rsdp_address,
+    );
 
     Ok(BootResult {
         entry_point,
