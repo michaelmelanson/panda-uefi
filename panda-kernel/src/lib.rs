@@ -11,18 +11,18 @@ mod acpi;
 #[macro_use]
 mod console;
 mod display;
+mod error;
 mod interrupts;
 mod irq;
 mod logger;
 mod memory;
+mod panic;
 
 pub use crate::console::_print;
 
-use self::acpi::AcpiError;
 use display::{FontSize, FontStyle, TextPart};
-use logger::LoggerError;
-use memory::MemoryError;
-use panda_loader_lib::{KernelEntryFn, LoaderCarePackage, LoaderCarePackageError};
+use error::KernelError;
+use panda_loader_lib::{KernelEntryFn, LoaderCarePackage};
 
 extern crate core;
 
@@ -30,38 +30,6 @@ extern crate core;
 pub extern "win64" fn _start(care_package: &LoaderCarePackage) {
     kernel_init(care_package).expect("Failed to initialize kernel");
     kernel_main().expect("Kernel panic");
-}
-
-#[derive(Debug)]
-pub enum KernelError {
-    AcpiError(AcpiError),
-    LoggerError(LoggerError),
-    LoaderCarePackageError(LoaderCarePackageError),
-    MemoryError(MemoryError),
-}
-
-impl From<AcpiError> for KernelError {
-    fn from(error: AcpiError) -> Self {
-        KernelError::AcpiError(error)
-    }
-}
-
-impl From<LoggerError> for KernelError {
-    fn from(error: LoggerError) -> Self {
-        KernelError::LoggerError(error)
-    }
-}
-
-impl From<LoaderCarePackageError> for KernelError {
-    fn from(error: LoaderCarePackageError) -> Self {
-        KernelError::LoaderCarePackageError(error)
-    }
-}
-
-impl From<MemoryError> for KernelError {
-    fn from(error: MemoryError) -> Self {
-        KernelError::MemoryError(error)
-    }
 }
 
 fn kernel_init(care_package: &LoaderCarePackage) -> Result<(), KernelError> {
@@ -97,14 +65,3 @@ fn kernel_main() -> Result<(), KernelError> {
 // check that it's compatible with the entry point
 #[allow(dead_code)]
 const ENTRY_FN: KernelEntryFn = _start;
-
-#[panic_handler]
-pub fn panic_handler(_info: &core::panic::PanicInfo) -> ! {
-    println!("Panic: {}", _info);
-    loop {
-        x86_64::instructions::hlt();
-    }
-}
-
-#[lang = "eh_personality"]
-extern "C" fn eh_personality() {}
