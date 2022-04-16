@@ -1,10 +1,20 @@
+mod interrupts;
+
 use acpi::InterruptModel;
 use x2apic::lapic::{IpiDestMode, LocalApic, TimerDivide, TimerMode};
 use x86_64::PhysAddr;
 
-use crate::memory;
+use crate::{
+    interrupts::install_interrupt_handler,
+    irq::interrupts::{lapic_error_handler, lapic_spurious_handler, lapic_timer_handler},
+    memory,
+};
 
 static mut INTERRUPT_MODEL: Option<InterruptModel> = None;
+
+const TIMER_VECTOR: usize = 0x20;
+const ERROR_VECTOR: usize = 0x21;
+const SPURIOUS_VECTOR: usize = 0x22;
 
 #[derive(Debug)]
 pub enum ApicError {
@@ -19,9 +29,9 @@ pub fn lapic() -> Result<LocalApic, ApicError> {
         let apic = x2apic::lapic::LocalApicBuilder::new()
             .set_xapic_base(base_address.as_u64())
             .ipi_destination_mode(IpiDestMode::Logical)
-            .timer_vector(0x20)
-            .error_vector(0x21)
-            .spurious_vector(0x22)
+            .timer_vector(TIMER_VECTOR)
+            .error_vector(ERROR_VECTOR)
+            .spurious_vector(SPURIOUS_VECTOR)
             .build()
             .map_err(ApicError::ApicError)?;
 
@@ -32,15 +42,20 @@ pub fn lapic() -> Result<LocalApic, ApicError> {
 }
 
 pub fn init(interrupt_model: InterruptModel) {
-    log::info!("Interrupt model: {:?}", interrupt_model);
-
     unsafe {
         INTERRUPT_MODEL = Some(interrupt_model);
+    }
 
-        let mut lapic = lapic().unwrap();
-        lapic.set_timer_mode(TimerMode::Periodic);
-        lapic.set_timer_divide(TimerDivide::Div256);
-        lapic.enable();
+    if let Ok(mut lapic) = lapic() {
+        install_interrupt_handler(TIMER_VECTOR, lapic_timer_handler);
+        install_interrupt_handler(ERROR_VECTOR, lapic_error_handler);
+        install_interrupt_handler(SPURIOUS_VECTOR, lapic_spurious_handler);
+
+        unsafe {
+            lapic.set_timer_mode(TimerMode::Periodic);
+            lapic.set_timer_divide(TimerDivide::Div256);
+            lapic.enable();
+        }
     }
 }
 

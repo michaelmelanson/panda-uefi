@@ -79,19 +79,18 @@ fn kernel_init(care_package: &LoaderCarePackage) -> Result<(), KernelError> {
 
     let acpi = acpi::init(care_package.rsdp_address)?;
     irq::init(acpi.interrupt_model);
-
-    x86_64::instructions::interrupts::enable();
-
     Ok(())
 }
 
 fn kernel_main() -> Result<(), KernelError> {
+    x86_64::instructions::interrupts::enable();
+
     display::write_text(TextPart("Panda OS\n", FontSize::Large, FontStyle::Bold));
     log::info!("Looks like everything's working!");
 
     loop {
         x86_64::instructions::hlt();
-        log::info!("HLT interrupted");
+        log::debug!("HLT interrupted");
     }
 }
 

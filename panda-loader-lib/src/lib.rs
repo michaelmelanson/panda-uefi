@@ -5,10 +5,10 @@ mod frame_buffer;
 mod memory_descriptor;
 
 use alloc::vec::Vec;
+use x86_64::{PhysAddr, VirtAddr};
 
 pub use frame_buffer::{FrameBuffer, PixelFormat};
 pub use memory_descriptor::{MemoryDescriptor, MemoryDescriptorType};
-use x86_64::{PhysAddr, VirtAddr};
 
 pub type KernelEntryFn = extern "win64" fn(&LoaderCarePackage);
 
