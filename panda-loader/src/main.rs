@@ -29,7 +29,11 @@ use uefi::{
             fs::SimpleFileSystem,
         },
     },
-    table::boot::{AllocateType, MemoryType},
+    table::{
+        boot::{AllocateType, MemoryType},
+        runtime::ResetType,
+        Runtime,
+    },
     CStr16,
 };
 use x86_64::{
@@ -46,6 +50,7 @@ const PHYSICAL_MEMORY_VIRTUAL_BASE: VirtAddr = unsafe { VirtAddr::new_unsafe(0x0
 struct BootResult {
     entry_point: VirtAddr,
     loader_care_package: LoaderCarePackage,
+    system_table: SystemTable<Runtime>,
 }
 
 fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResult, uefi::Error> {
@@ -84,7 +89,7 @@ fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResu
             panic!("Kernel image is not a file");
         };
 
-        log::info!("Found kernel image");
+        log::debug!("Found kernel image");
 
         let mut kernel_image_info_buf = vec![0; 102];
         let kernel_image_info = kernel_file
@@ -107,7 +112,7 @@ fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResu
         let bytes_read = kernel_file
             .read(&mut kernel_image[..])
             .expect("could not read kernel image");
-        log::info!("Read {} bytes of kernel image", bytes_read);
+        log::debug!("Read {} bytes of kernel image", bytes_read);
 
         let kernel_object =
             goblin::Object::parse(&kernel_image[..]).expect("Could not parse kernel image");
@@ -123,17 +128,16 @@ fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResu
     mmap_buf.resize(mmap_size.map_size * 2, 0);
     let mut memory_map = Vec::<MemoryDescriptor>::with_capacity(mmap_size.map_size);
 
-    println!("Exiting boot services...");
+    log::debug!("Exiting boot services...");
 
-    let (_system_table, memory_map_iter) =
-        system_table.exit_boot_services(handle, &mut mmap_buf)?;
+    let (system_table, memory_map_iter) = system_table.exit_boot_services(handle, &mut mmap_buf)?;
 
     // if you get a memory error here, it's probably because something
     // allocated above is being deallocated below, when the allocator has been dropped.
     uefi::alloc::exit_boot_services();
     logging::exit_boot_services();
 
-    println!("Boot services exited, copying memory map...");
+    log::debug!("Boot services exited, copying memory map...");
     memory_map_iter
         .map(|descriptor| MemoryDescriptor {
             base_addr: PhysAddr::new(descriptor.phys_start),
@@ -174,7 +178,7 @@ fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResu
                 .unwrap()
                 .flush();
 
-            println!("  Mapped {page:?} to {phys:?}", phys = mapping.phys_frame);
+            log::debug!("Mapped {page:?} to {phys:?}", phys = mapping.phys_frame);
         }
     }
 
@@ -184,10 +188,10 @@ fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResu
     let loader_care_package =
         LoaderCarePackage::new(frame_buffer, memory_map, PHYSICAL_MEMORY_VIRTUAL_BASE);
 
-    println!("UEFI boot successful");
     Ok(BootResult {
         entry_point,
         loader_care_package,
+        system_table,
     })
 }
 
@@ -218,13 +222,18 @@ fn uefi_start(handle: Handle, system_table: SystemTable<Boot>) -> Status {
         Ok(BootResult {
             entry_point,
             ref mut loader_care_package,
+            system_table,
         }) => {
-            println!("Kernel loaded successfully with entry point {entry_point:X}");
-
             let start = unsafe { core::mem::transmute::<u64, KernelEntryFn>(entry_point.as_u64()) };
 
+            log::info!("Starting kernel...");
             start(loader_care_package);
-            panic!("Kernel returned");
+            log::warn!("Kernel returned, shutting down machine");
+            unsafe {
+                system_table
+                    .runtime_services()
+                    .reset(ResetType::Shutdown, Status::SUCCESS, None);
+            }
         }
         Err(error) => {
             println!("UEFI boot failed: {:?}", error);

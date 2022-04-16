@@ -1,5 +1,6 @@
 use core::fmt::Write;
 
+use log::Level;
 use uart_16550::SerialPort;
 use uefi::table::Boot;
 
@@ -58,8 +59,8 @@ pub fn exit_boot_services() {
 }
 
 impl log::Log for ConsoleLogger {
-    fn enabled(&self, _metadata: &log::Metadata) -> bool {
-        true // metadata.level() >= log::Level::Info
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= Level::Info
     }
 
     fn log(&self, record: &log::Record) {

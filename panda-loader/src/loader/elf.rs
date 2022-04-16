@@ -19,7 +19,7 @@ pub fn load_elf_binary<S: PageSize, A: FrameAllocator<S>>(
 
     for section in binary.section_headers.iter() {
         let name = binary.shdr_strtab.get_at(section.sh_name).unwrap();
-        log::info!(
+        log::debug!(
             "Section {name}: addr={addr:#08X}, size={size}",
             addr = section.sh_addr,
             size = section.sh_size

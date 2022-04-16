@@ -1,3 +1,5 @@
+use log::Level;
+
 #[derive(Debug)]
 pub enum LoggerError {
     SetLoggerError(log::SetLoggerError),
@@ -18,8 +20,8 @@ pub fn init() -> Result<(), LoggerError> {
 struct ConsoleLogger;
 
 impl log::Log for ConsoleLogger {
-    fn enabled(&self, _metadata: &log::Metadata) -> bool {
-        true // metadata.level() >= log::Level::Info
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= Level::Info
     }
 
     fn log(&self, record: &log::Record) {
