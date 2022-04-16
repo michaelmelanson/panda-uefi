@@ -29,7 +29,7 @@ use uefi::{
             fs::SimpleFileSystem,
         },
     },
-    table::boot::{AllocateType, MemoryDescriptor as UefiMemoryDescriptor, MemoryType},
+    table::boot::{AllocateType, MemoryType},
     CStr16,
 };
 use x86_64::{
@@ -44,7 +44,6 @@ use x86_64::{
 const PHYSICAL_MEMORY_VIRTUAL_BASE: VirtAddr = unsafe { VirtAddr::new_unsafe(0x000000000) };
 
 struct BootResult {
-    mmap_buf: Vec<u8>,
     entry_point: VirtAddr,
     loader_care_package: LoaderCarePackage,
 }
@@ -146,6 +145,7 @@ fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResu
             },
         })
         .collect_into(&mut memory_map);
+    core::mem::forget(mmap_buf);
 
     let level_4_table = unsafe {
         let (cr3, _) = Cr3::read();
@@ -186,7 +186,6 @@ fn uefi_boot(handle: Handle, system_table: SystemTable<Boot>) -> Result<BootResu
 
     println!("UEFI boot successful");
     Ok(BootResult {
-        mmap_buf,
         entry_point,
         loader_care_package,
     })
@@ -217,7 +216,6 @@ fn framebuffer_from_uefi(system_table: &SystemTable<Boot>) -> Result<FrameBuffer
 fn uefi_start(handle: Handle, system_table: SystemTable<Boot>) -> Status {
     match uefi_boot(handle, system_table) {
         Ok(BootResult {
-            mmap_buf,
             entry_point,
             ref mut loader_care_package,
         }) => {

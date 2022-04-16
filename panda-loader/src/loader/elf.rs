@@ -2,8 +2,8 @@ use alloc::vec::Vec;
 use goblin::elf::Elf;
 
 use x86_64::{
-    structures::paging::{FrameAllocator, PageSize, Size4KiB},
-    PhysAddr, VirtAddr,
+    structures::paging::{FrameAllocator, PageSize},
+    VirtAddr,
 };
 
 use crate::loader::{FrameMapping, LoadResult};

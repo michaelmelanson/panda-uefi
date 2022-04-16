@@ -1,8 +1,7 @@
 mod elf;
 use alloc::vec::Vec;
 use x86_64::{
-    structures::paging::{FrameAllocator, PageSize, PhysFrame, Size4KiB},
-    PhysAddr, VirtAddr,
+    structures::paging::{FrameAllocator, PageSize, PhysFrame}, VirtAddr,
 };
 
 pub struct FrameMapping<S: PageSize> {
