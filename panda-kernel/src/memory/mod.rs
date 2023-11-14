@@ -1,14 +1,16 @@
 mod frame_allocator;
 
+#[cfg(not(test))]
 use core::alloc::Layout;
+use core::mem::size_of;
 
 use linked_list_allocator::LockedHeap;
 use panda_loader_lib::MemoryDescriptor;
 use x86_64::{
     structures::paging::{
-        mapper::{MapToError, UnmapError},
+        mapper::{MapToError, TranslateResult, UnmapError},
         FrameAllocator, Mapper, OffsetPageTable, Page, PageSize, PageTable, PageTableFlags,
-        PhysFrame, Size2MiB, Size4KiB,
+        PhysFrame, Size2MiB, Size4KiB, Translate,
     },
     PhysAddr, VirtAddr,
 };
@@ -16,7 +18,7 @@ use x86_64::{
 use self::frame_allocator::PhysicalAllocator;
 
 #[global_allocator]
-static GLOBAL_ALLOCATOR: LockedHeap = LockedHeap::empty();
+pub static GLOBAL_ALLOCATOR: LockedHeap = LockedHeap::empty();
 
 static mut FRAME_ALLOCATOR: PhysicalAllocator = PhysicalAllocator::new();
 
@@ -117,7 +119,47 @@ pub fn init(descriptors: &[MemoryDescriptor], phys_mem_base: VirtAddr) -> Result
     Ok(())
 }
 
+#[cfg(not(test))]
 #[alloc_error_handler]
 fn alloc_error(layout: Layout) -> ! {
     panic!("Allocation error: {:?}", layout);
+}
+
+pub(crate) unsafe fn mark_deref_as_uncacheable<T>(ptr: *const T) {
+    let start_address = VirtAddr::from_ptr(ptr);
+    mark_as_uncacheable(start_address, start_address + size_of::<T>())
+}
+
+pub(crate) unsafe fn mark_as_uncacheable(start_address: VirtAddr, end_address: VirtAddr) {
+    let mut mapper = page_mapper();
+
+    let range = Page::<Size2MiB>::range(
+        Page::containing_address(start_address),
+        Page::containing_address(end_address),
+    );
+
+    for page in range {
+        match mapper.translate(page.start_address()) {
+            TranslateResult::Mapped {
+                frame: _,
+                offset: _,
+                mut flags,
+            } => {
+                flags.set(PageTableFlags::NO_CACHE, true);
+
+                mapper
+                    .update_flags(page, flags)
+                    .expect("Failed to update memory page flags")
+                    .flush();
+            }
+
+            TranslateResult::NotMapped => todo!(),
+            TranslateResult::InvalidFrameAddress(_) => todo!(),
+        }
+    }
+}
+
+pub fn virtual_to_physical(addr: VirtAddr) -> Option<PhysAddr> {
+    let mut mapper = unsafe { page_mapper() };
+    mapper.translate_addr(addr)
 }

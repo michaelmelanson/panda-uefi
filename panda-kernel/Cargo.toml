@@ -2,22 +2,33 @@
 name = "panda-kernel"
 version = "0.1.0"
 authors = ["Michael Melanson <michael@michaelmelanson.net>"]
-edition = "2018"
+edition = "2021"
 
 [lib]
 crate-type = ["bin"]
 
 [dependencies]
+"ata" = { path = "../ata" }
 "panda-loader-lib" = { path = "../panda-loader-lib" }
 spin = "0.9"
 fontdue = { version = "0.7.2", default-features = false }
 uart_16550 = { version = "0.2" }
 x86_64 = "*"
-linked_list_allocator = "0.9"
+linked_list_allocator = { version = "0.9", features = ['alloc_ref', 'use_spin'] }
 log = "*"
-acpi = "4.1.0"
+acpi = { path = "../../acpi/acpi", features = ['allocator_api'] }
+aml = { path = "../../acpi/aml" }
 x2apic = "0.4.0"
+futures-util = { version = "0.3", default-features = false, features = ['alloc'] }
+eisaid = { path = "../eisaid" }
+bitfield = "*"
+thingbuf = { version = "*", default-features = false, features=['alloc'] }
 
 [dependencies.conquer-once]
 version = "0.3.2"
 default-features = false
+
+[dependencies.crossbeam-queue]
+version = "0.3"
+default-features = false
+features = ["alloc"]

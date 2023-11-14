@@ -1,9 +1,6 @@
 use core::fmt::Write;
 
-use alloc::format;
 use uart_16550::SerialPort;
-
-use crate::display::{self, FontSize, FontStyle, TextPart};
 
 static mut QEMU_OUTPUT: Option<SerialPort> = None;
 
@@ -23,11 +20,11 @@ pub fn _print(args: core::fmt::Arguments) {
     if let Some(serial_port) = unsafe { &mut QEMU_OUTPUT } {
         let _ = serial_port.write_fmt(args);
     }
-    display::write_text(TextPart(
-        format!("{}", args).as_str(),
-        FontSize::Regular,
-        FontStyle::Regular,
-    ));
+    // display::write_text(TextPart(
+    //     alloc::format!("{}", args).as_str(),
+    //     FontSize::Regular,
+    //     FontStyle::Regular,
+    // ));
 }
 
 pub fn init() {

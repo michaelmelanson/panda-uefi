@@ -1,6 +1,9 @@
 [workspace]
 members = [
+  "ata",
   "panda-loader",
   "panda-kernel",
-  "panda-loader-lib"
+  "panda-loader-lib",
+  "eisaid"
 ]
+resolver = "2"

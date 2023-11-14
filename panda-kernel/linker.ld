@@ -29,6 +29,11 @@ SECTIONS {
     *(.got.*)
   }
 
+  .gcc_except_table : ALIGN(2097152)
+  {
+    *(.gcc_except_table.*)
+  }
+
   /DISCARD/ :
   {
     *(.note.gnu.*)

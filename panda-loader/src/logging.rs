@@ -41,7 +41,7 @@ pub fn init(system_table: &uefi::table::SystemTable<Boot>) -> Result<(), log::Se
         .boot_services()
         .locate_protocol::<uefi::proto::console::text::Output>()
         .unwrap();
-    let console = &*console.clone();
+
     unsafe {
         UEFI_CONSOLE = Some(console.get());
     }

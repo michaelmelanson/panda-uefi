@@ -1,15 +1,18 @@
 #![no_std]
 #![no_main]
+#![feature(allocator_api)]
 #![feature(lang_items)]
 #![feature(start)]
-#![feature(once_cell)]
 #![feature(alloc_error_handler)]
 #![feature(abi_x86_interrupt)]
+#![feature(async_closure)]
+#![feature(link_llvm_intrinsics)]
 extern crate alloc;
 
 mod acpi;
 #[macro_use]
 mod console;
+mod devices;
 mod display;
 mod error;
 mod interrupts;
@@ -17,6 +20,9 @@ mod irq;
 mod logger;
 mod memory;
 mod panic;
+mod pci;
+mod task;
+mod util;
 
 pub use crate::console::_print;
 
@@ -44,9 +50,10 @@ fn kernel_init(care_package: &LoaderCarePackage) -> Result<(), KernelError> {
         care_package.phys_memory_virt_offset,
     )?;
     display::init(care_package.frame_buffer.clone());
+    task::init();
 
-    let acpi = acpi::init(care_package.rsdp_address)?;
-    irq::init(acpi.interrupt_model);
+    let _ = acpi::init(care_package.rsdp_address)?;
+
     Ok(())
 }
 
@@ -57,8 +64,13 @@ fn kernel_main() -> Result<(), KernelError> {
     log::info!("Looks like everything's working!");
 
     loop {
-        x86_64::instructions::hlt();
-        log::debug!("HLT interrupted");
+        task::step();
+
+        if task::is_queue_empty() {
+            x86_64::instructions::interrupts::enable_and_hlt();
+            x86_64::instructions::interrupts::disable();
+            log::info!("HLT interrupted");
+        }
     }
 }
 

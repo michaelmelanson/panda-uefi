@@ -5,17 +5,19 @@ clean:
 	rm -Rf build
 
 run: all
-	qemu-system-x86_64 \
+	/Users/michael/dev/qemu/build/qemu-system-x86_64 \
 	  -nodefaults \
       -vga virtio \
 	  -machine q35,accel=kvm:tcg \
 	  -m 1024M \
-	  -drive if=pflash,unit=0,format=raw,readonly,file=vendor/OVMF_CODE.fd \
+	  -drive if=pflash,unit=0,format=raw,readonly=on,file=vendor/OVMF_CODE.fd \
 	  -drive if=pflash,unit=1,format=raw,file=vendor/OVMF_VARS-1024x768.fd \
 	  -drive format=raw,file=fat:rw:build \
-	  -serial stdio \
 	  -monitor vc:1024x768 \
-	#   -d int \
+	  -nic user,model=virtio-net-pci \
+      -d trace:ahci_*,trace:ide_*,trace:cmd_identify,int \
+	  -serial stdio \
+	  -D qemu.log
 
 .PHONY: loader
 loader:

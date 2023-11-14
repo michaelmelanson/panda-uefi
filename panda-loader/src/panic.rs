@@ -1,6 +1,8 @@
+#[cfg(not(test))]
 #[lang = "eh_personality"]
 fn eh_personality() {}
 
+#[cfg(not(test))]
 #[cfg(not(feature = "no_panic_handler"))]
 #[panic_handler]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
