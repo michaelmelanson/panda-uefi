@@ -1,18 +1,24 @@
-use ata::ATACommand;
+use alloc::{boxed::Box, vec::Vec};
 use thingbuf::mpsc::Sender;
 
 use self::{
-    read_connected_status::ReadConnectedStatusReply, send_ata_command::SendATACommandReply,
+    identify::IdentifyCommandReply,
+    read::{ReadCommand, ReadCommandReply},
+    read_connected_status::ReadConnectedStatusReply,
 };
 
+use super::ide::ide_identify::IdeIdentifyData;
+
+pub mod identify;
+pub mod read;
 pub mod read_connected_status;
-pub mod send_ata_command;
 
 #[derive(Clone, Debug)]
 pub enum AhciPortCommand {
     Noop,
     ReadConnectedStatus(Sender<ReadConnectedStatusReply>),
-    SendATACommand(ATACommand, Sender<SendATACommandReply>),
+    Identify(Sender<IdentifyCommandReply>),
+    Read(ReadCommand, Sender<ReadCommandReply>),
 }
 
 impl Default for AhciPortCommand {

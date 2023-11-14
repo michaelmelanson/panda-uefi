@@ -5,6 +5,7 @@ use alloc::{
     vec::Vec,
 };
 
+#[derive(Clone)]
 #[repr(C)]
 pub struct IdeIdentifyData {
     pub signature: u16,             // 0: 0x0040
@@ -50,6 +51,7 @@ impl Default for IdeIdentifyData {
         }
     }
 }
+
 impl Debug for IdeIdentifyData {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("IdeIdentifyData")

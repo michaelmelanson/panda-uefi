@@ -13,10 +13,8 @@ use crate::{
         ahci_port::{
             ahci_command::AhciCommandHeader,
             ahci_physical_region_descriptor::AhciPhysicalRegionDescriptor,
-            commands::send_ata_command::SendATACommandReply,
-            fis::HostToDeviceRegisterFis,
-            ide::ide_identify::{self, IdeIdentifyData},
-            port::wait,
+            commands::identify::IdentifyCommandReply, fis::HostToDeviceRegisterFis,
+            ide::ide_identify::IdeIdentifyData,
         },
         ahci_wait_for_port_interrupt,
         registers::{
@@ -32,7 +30,8 @@ use self::{
     register::AhciPortRegister,
 };
 
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec};
+use ata::ATACommand;
 pub use commands::AhciPortCommand;
 use futures_util::{
     future::{select, Either},
@@ -48,20 +47,20 @@ pub async fn ahci_port_task(mut port: AhciPort, channel: Receiver<AhciPortComman
     // Allocate physical memory for its command list, the received FIS, and its command tables.
     // Make sure the command tables are 128 byte aligned.
     let command_list_stucture: AhciCommandListStructure = Default::default();
-    let mut command_list_stucture = Box::new(command_list_stucture);
+    let mut command_list_structure = Box::new(command_list_stucture);
 
     let mut command_tables: Box<[AhciCommandTable; 32]> = Box::new(Default::default());
     let received_fis = Box::new(AhciFis::default());
 
     // Memory map these slots as uncacheable.
     unsafe {
-        memory::mark_deref_as_uncacheable(command_list_stucture.as_ptr());
+        memory::mark_deref_as_uncacheable(command_list_structure.as_ptr());
         memory::mark_deref_as_uncacheable(command_tables.as_ptr());
         memory::mark_deref_as_uncacheable(&*received_fis as *const AhciFis);
     };
 
     // Set command list and received FIS address registers (and upper registers, if supported).
-    let command_list_structure_addr = command_list_stucture.as_ptr() as usize as u64;
+    let command_list_structure_addr = command_list_structure.as_ptr() as usize as u64;
     let command_list_structure_addr =
         memory::virtual_to_physical(VirtAddr::new(command_list_structure_addr))
             .expect("CLB base address not mapped")
@@ -153,38 +152,9 @@ pub async fn ahci_port_task(mut port: AhciPort, channel: Receiver<AhciPortComman
                     .expect("Failed to send reply");
             }
 
-            AhciPortCommand::SendATACommand(ata_command, reply) => {
-                log::info!("Received ATA command: {ata_command:?}");
-
-                let Some(free_slot) = find_free_slot(&port, &command_tables) else {
-                    todo!("no free slots");
-                };
-                log::info!("Free slot: {free_slot}");
-
-                log::info!(" -> Configured command list entries");
-                let command_table = &mut command_tables[free_slot];
-                let command_table_addr = command_table as *mut AhciCommandTable as u64;
-                let command_table_addr =
-                    memory::virtual_to_physical(VirtAddr::new(command_table_addr))
-                        .expect("could not translate command tale address to physical")
-                        .as_u64();
-                log::info!(" -> Command table address: {command_table_addr:X}");
-
-                let command_header = &mut command_list_stucture[free_slot];
-                command_header.set_command_table_descriptor_base_address_upper(
-                    (command_table_addr >> 32) as u32,
-                );
-                command_header
-                    .set_command_table_descriptor_base_address_lower(command_table_addr as u32);
-
-                let mut fis: HostToDeviceRegisterFis<[u8; 64]> =
-                    HostToDeviceRegisterFis::new(command_table.command_fis);
-                fis.set_command(ata_command.into());
-                fis.set_command_or_control(true);
-                fis.set_device(0);
-                fis.set_pmport(0);
-                command_table.command_fis = fis.0;
-                command_header.set_command_fis_length(1);
+            AhciPortCommand::Identify(reply) => {
+                log::info!("Received IDENTIFY command");
+                let ata_command = ATACommand::Identify;
 
                 let result_data = [0u8; 512];
                 let result_data_addr =
@@ -192,44 +162,20 @@ pub async fn ahci_port_task(mut port: AhciPort, channel: Receiver<AhciPortComman
                         .expect("could not translate result data to physical")
                         .as_u64();
 
-                unsafe {
-                    memory::mark_deref_as_uncacheable(result_data.as_ptr());
-                }
-
                 let mut phys_region = AhciPhysicalRegionDescriptor([0u32; 4]);
                 phys_region.set_data_base_addr_upper((result_data_addr >> 32) as u32);
                 phys_region.set_data_base_addr_lower(result_data_addr as u32);
-                phys_region.set_data_byte_count(core::mem::size_of::<IdeIdentifyData>() as u32);
+                phys_region.set_data_byte_count((result_data.len() - 1) as u32);
                 phys_region.set_interrupt_on_completion(true);
-                command_table.phys_region_descriptors[0] = phys_region;
 
-                command_header.set_phys_region_descriptor_table_length(1);
-
-                command_header.set_write(false);
-                command_header.set_prefetchable(false);
-
-                // clear any prior errors or pending interrupts
-                port.write(AhciPortRegister::SATAError, 0);
-                port.write(AhciPortRegister::InterruptStatus, 0);
-
-                log::info!("Sending command to device...");
-                port.write(AhciPortRegister::CommandIssue, 1 << free_slot);
-
-                log::info!("Waiting for completion");
-                ahci_wait_for_port_interrupt(port.index()).await;
-
-                // the command should have completed by now.
-                let pxci = port.read(AhciPortRegister::CommandIssue);
-                loop {
-                    if pxci & (1 << free_slot) == 0 {
-                        break;
-                    }
-                }
-
-                log::info!(
-                    "Command complete, error register is {:X}",
-                    port.read(AhciPortRegister::SATAError)
-                );
+                perform_ata_command(
+                    &mut port,
+                    &mut command_tables,
+                    &mut command_list_structure,
+                    ata_command,
+                    &[phys_region],
+                )
+                .await;
 
                 let ide_identify =
                     unsafe { core::mem::transmute::<[u8; 512], IdeIdentifyData>(result_data) };
@@ -237,10 +183,11 @@ pub async fn ahci_port_task(mut port: AhciPort, channel: Receiver<AhciPortComman
                 assert_eq!(ide_identify.signature, 0x0040);
 
                 reply
-                    .send(SendATACommandReply::Success)
+                    .send(IdentifyCommandReply { ide_identify })
                     .await
                     .expect("Failed to send reply")
             }
+            AhciPortCommand::Read(command, reply) => todo!("read command"),
         }
     }
 }
@@ -265,4 +212,69 @@ fn find_free_slot(port: &AhciPort, command_list: &[AhciCommandTable; 32]) -> Opt
     }
 
     None
+}
+
+async fn perform_ata_command(
+    port: &mut AhciPort,
+    command_tables: &mut [AhciCommandTable; 32],
+    command_list_structure: &mut AhciCommandListStructure,
+    ata_command: ATACommand,
+    phys_regions: &[AhciPhysicalRegionDescriptor<[u32; 4]>],
+) {
+    let Some(free_slot) = find_free_slot(&port, &command_tables) else {
+        todo!("no free slots");
+    };
+    log::info!("Free slot: {free_slot}");
+
+    log::info!(" -> Configured command list entries");
+    let command_table = &mut command_tables[free_slot];
+    let command_table_addr = command_table as *mut AhciCommandTable as u64;
+    let command_table_addr = memory::virtual_to_physical(VirtAddr::new(command_table_addr))
+        .expect("could not translate command tale address to physical")
+        .as_u64();
+    log::info!(" -> Command table address: {command_table_addr:X}");
+
+    let command_header = &mut command_list_structure[free_slot];
+    command_header
+        .set_command_table_descriptor_base_address_upper((command_table_addr >> 32) as u32);
+    command_header.set_command_table_descriptor_base_address_lower(command_table_addr as u32);
+
+    let mut fis: HostToDeviceRegisterFis<[u8; 64]> =
+        HostToDeviceRegisterFis::new(command_table.command_fis);
+    fis.set_command(ata_command.into());
+    fis.set_command_or_control(true);
+    fis.set_device(0);
+    fis.set_pmport(0);
+    command_table.command_fis = fis.0;
+    command_header.set_command_fis_length(1);
+
+    assert!(phys_regions.len() <= 10);
+    command_table.phys_region_descriptors[0..phys_regions.len()].copy_from_slice(phys_regions);
+    command_header.set_phys_region_descriptor_table_length(phys_regions.len() as u16);
+
+    command_header.set_write(false);
+    command_header.set_prefetchable(true);
+
+    // clear any prior errors or pending interrupts
+    port.write(AhciPortRegister::SATAError, 0);
+    port.write(AhciPortRegister::InterruptStatus, 0);
+
+    log::info!("Sending command to device...");
+    port.write(AhciPortRegister::CommandIssue, 1 << free_slot);
+
+    log::info!("Waiting for completion");
+    ahci_wait_for_port_interrupt(port.index()).await;
+
+    // the command should have completed by now.
+    let pxci = port.read(AhciPortRegister::CommandIssue);
+    loop {
+        if pxci & (1 << free_slot) == 0 {
+            break;
+        }
+    }
+
+    log::info!(
+        "Command complete, error register is {:X}",
+        port.read(AhciPortRegister::SATAError)
+    );
 }

@@ -125,12 +125,9 @@ async fn ahci_controller_task(mut controller: AhciController) {
 
         //     Send IDENTIFY ATA command to connected drives. Get their sector size and count.
         let (sender, receiver) = channel(1);
-        port.send(AhciPortCommand::SendATACommand(
-            ATACommand::Identify,
-            sender,
-        ))
-        .await
-        .expect("Failed to send ATA IDENTIFY command");
+        port.send(AhciPortCommand::Identify(sender))
+            .await
+            .expect("Failed to send ATA IDENTIFY command");
 
         if let Some(reply) = receiver.recv().await {
             log::info!(" -> IDENTIFY response: {reply:?}");
