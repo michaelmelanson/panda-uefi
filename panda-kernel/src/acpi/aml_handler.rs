@@ -1,6 +1,10 @@
-use core::fmt::{UpperHex, Display};
+use core::fmt::{Display, UpperHex};
 
-use x86_64::{PhysAddr, instructions::port::Port, structures::port::{PortRead, PortWrite}};
+use x86_64::{
+    instructions::port::Port,
+    structures::port::{PortRead, PortWrite},
+    PhysAddr,
+};
 
 use crate::{memory, pci};
 
@@ -13,13 +17,20 @@ impl AmlHandler {
 
     fn read<T: UpperHex + Copy>(&self, address: usize) -> T {
         let addr = memory::physical_to_virtual(PhysAddr::new(address as u64));
-        
-        let value = unsafe { * addr.as_ptr() };
+
+        let value = unsafe { *addr.as_ptr() };
         log::info!("AML: memory read from {address:#X} = {value:#X}");
         value
     }
 
-    fn pci_read<T: 'static + UpperHex + Copy + Default>(&self, segment: u16, bus: u8, device: u8, function: u8, offset: u16) -> T {
+    fn pci_read<T: 'static + UpperHex + Copy + Default>(
+        &self,
+        segment: u16,
+        bus: u8,
+        device: u8,
+        function: u8,
+        offset: u16,
+    ) -> T {
         match pci::read(segment, bus, device, function, offset) {
             Ok(value) => {
                 log::info!("AML: PCI read from {segment:X}:{bus:X}:{device:X}:{function:X}+{offset:X} = {value:X}");
@@ -152,5 +163,13 @@ impl aml::Handler for AmlHandler {
         value: u32,
     ) {
         todo!("aml write_pci_u32 at {segment:X}:{bus:X}:{device:X}:{function:X}:{offset:X} with value {value:X}")
+    }
+
+    fn stall(&self, microseconds: u64) {
+        todo!("aml stall {microseconds}µs");
+    }
+
+    fn sleep(&self, milliseconds: u64) {
+        todo!("aml sleep {milliseconds}ms");
     }
 }

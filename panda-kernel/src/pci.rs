@@ -6,9 +6,9 @@ use x86_64::PhysAddr;
 
 use crate::memory;
 
-static PCI_CONFIG_REGIONS: Once<PciConfigRegions<'static, LockedHeap>> = Once::new();
+static PCI_CONFIG_REGIONS: Once<PciConfigRegions<'static, &'static LockedHeap>> = Once::new();
 
-pub fn init(pci_config_regions: PciConfigRegions<'static, LockedHeap>) {
+pub fn init(pci_config_regions: PciConfigRegions<'static, &'static LockedHeap>) {
     PCI_CONFIG_REGIONS.call_once(move || pci_config_regions);
 
     log::info!("PCI initialized");

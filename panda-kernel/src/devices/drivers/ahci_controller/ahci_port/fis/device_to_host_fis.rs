@@ -1,7 +1,5 @@
 use bitfield::bitfield;
 
-use super::FisType;
-
 bitfield! {
     pub struct DeviceToHostRegisterFis([u8]);
     impl Debug;
@@ -29,6 +27,3 @@ bitfield! {
     // DWORD 4
     // 32 bits reserved
 }
-
-
-// impl<T: AsMut<[u8]>> DeviceToHostRegisterFis<T> {}

@@ -1,10 +1,9 @@
 use alloc::vec::Vec;
-use ata::ATACommand;
 use bitfield::Bit;
 use conquer_once::spin::OnceCell;
 use thingbuf::mpsc::channel;
 use x2apic::ioapic::IrqFlags;
-use x86_64::{structures::idt::InterruptStackFrame, VirtAddr};
+use x86_64::structures::idt::InterruptStackFrame;
 
 use crate::{
     devices::drivers::ahci_controller::{

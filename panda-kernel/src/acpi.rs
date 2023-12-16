@@ -47,7 +47,7 @@ impl From<::aml::AmlError> for AcpiError {
 }
 
 pub struct AcpiInitResult<'a, A: Allocator> {
-    pub processor_info: Option<ProcessorInfo<'a, A>>,
+    pub processor_info: Option<ProcessorInfo<'a, &'a A>>,
 }
 
 pub fn init<'a>(

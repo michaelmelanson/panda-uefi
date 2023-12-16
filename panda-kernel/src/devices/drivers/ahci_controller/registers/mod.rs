@@ -19,5 +19,4 @@ pub use ahci_port_sata_control_register::{AhciPortSataControlRegister, DeviceDet
 pub use ahci_port_sata_status_register::{
     AhciPortSataStatusIPM, AhciPortSataStatusRegister, AhciPortSataStatusSPD,
 };
-pub use ahci_port_task_file_data_register::AhciPortTaskFileDataRegister;
 pub use bios_os_control_status::AhciBiosOsControlStatusRegister;

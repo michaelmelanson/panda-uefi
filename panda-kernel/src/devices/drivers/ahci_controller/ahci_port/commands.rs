@@ -1,4 +1,3 @@
-use alloc::{boxed::Box, vec::Vec};
 use thingbuf::mpsc::Sender;
 
 use self::{
@@ -6,8 +5,6 @@ use self::{
     read::{ReadCommand, ReadCommandReply},
     read_connected_status::ReadConnectedStatusReply,
 };
-
-use super::ide::ide_identify::IdeIdentifyData;
 
 pub mod identify;
 pub mod read;

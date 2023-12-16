@@ -16,7 +16,7 @@ use crate::{
     memory,
 };
 
-static mut INTERRUPT_MODEL: Option<InterruptModel<'static, LockedHeap>> = None;
+static mut INTERRUPT_MODEL: Option<InterruptModel<'static, &LockedHeap>> = None;
 
 const TIMER_VECTOR: usize = 0x20;
 const ERROR_VECTOR: usize = 0x21;
@@ -69,7 +69,7 @@ unsafe fn ioapic(index: usize) -> Result<IoApic, ApicError> {
     }
 }
 
-pub fn init(interrupt_model: InterruptModel<'static, LockedHeap>) {
+pub fn init(interrupt_model: InterruptModel<'static, &'static LockedHeap>) {
     unsafe {
         INTERRUPT_MODEL = Some(interrupt_model);
     }

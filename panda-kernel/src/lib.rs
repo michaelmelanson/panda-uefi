@@ -1,11 +1,12 @@
 #![no_std]
 #![no_main]
 #![feature(allocator_api)]
-#![feature(lang_items)]
 #![feature(start)]
 #![feature(alloc_error_handler)]
 #![feature(abi_x86_interrupt)]
 #![feature(async_closure)]
+#![allow(internal_features)]
+#![feature(lang_items)]
 #![feature(link_llvm_intrinsics)]
 extern crate alloc;
 
