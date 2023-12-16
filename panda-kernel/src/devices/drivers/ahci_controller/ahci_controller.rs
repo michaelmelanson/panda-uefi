@@ -139,10 +139,4 @@ impl AhciController {
     pub(crate) fn capabilities(&self) -> AhciHbaCapabilitiesRegister {
         AhciHbaCapabilitiesRegister(self.read(AhciRegister::HostCapability))
     }
-
-    pub(crate) fn clear_interrupt(&self, port_index: u8) {
-        let mut is = self.read(AhciRegister::InterruptStatus);
-        is = is & !(1 << port_index);
-        self.write(AhciRegister::InterruptStatus, is);
-    }
 }

@@ -2,10 +2,12 @@
 #![no_main]
 #![feature(panic_info_message)]
 #![feature(alloc_error_handler)]
-#![feature(lang_items)]
 #![feature(int_roundings)]
 #![feature(iter_collect_into)]
 #![feature(alloc_layout_extra)]
+#![allow(internal_features)]
+#![feature(lang_items)]
+
 extern crate alloc;
 
 mod loader;

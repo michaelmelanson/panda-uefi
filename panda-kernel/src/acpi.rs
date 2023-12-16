@@ -117,6 +117,15 @@ pub fn init<'a>(
     Ok(AcpiInitResult { processor_info })
 }
 
+pub fn to_handle(aml_name: &AmlName) -> Result<AmlHandle, AcpiError> {
+    let aml_context = unsafe { AML_CONTEXT.get() }
+        .ok_or(AcpiError::NotInitialized)?
+        .read();
+
+    let handle = aml_context.namespace.get_handle(aml_name)?;
+    Ok(handle)
+}
+
 pub fn get_key(context: &AmlContext, aml_name: &AmlName, key: &str) -> Result<AmlValue, AmlError> {
     let child_aml_name = AmlName::from_str(key)?;
     let resolved_name = child_aml_name.resolve(aml_name)?;
@@ -133,20 +142,20 @@ pub fn get(handle: AmlHandle) -> Result<AmlValue, AcpiError> {
     Ok(value.clone())
 }
 
-pub fn get_as_string(aml_name: &AmlName) -> Result<String, AcpiError> {
+pub fn get_as_string(handle: AmlHandle) -> Result<String, AcpiError> {
     let aml_context = unsafe { AML_CONTEXT.get() }
         .ok_or(AcpiError::NotInitialized)?
         .read();
-    let value = aml_context.namespace.get_by_path(aml_name)?;
+    let value = aml_context.namespace.get(handle)?;
     let string = value.as_string(&aml_context)?;
     Ok(string)
 }
 
-pub fn get_as_integer(aml_name: &AmlName) -> Result<u64, AcpiError> {
+pub fn get_as_integer(handle: AmlHandle) -> Result<u64, AcpiError> {
     let aml_context = unsafe { AML_CONTEXT.get() }
         .ok_or(AcpiError::NotInitialized)?
         .read();
-    let value = aml_context.namespace.get_by_path(aml_name)?;
+    let value = aml_context.namespace.get(handle)?;
     let integer = value.as_integer(&aml_context)?;
     Ok(integer)
 }

@@ -41,10 +41,10 @@ pub extern "win64" fn _start(care_package: &LoaderCarePackage) {
 fn kernel_init(care_package: &LoaderCarePackage) -> Result<(), KernelError> {
     console::init();
     logger::init()?;
+    interrupts::init();
 
     care_package.validate()?;
 
-    interrupts::init();
     memory::init(
         &care_package.memory_map,
         care_package.phys_memory_virt_offset,

@@ -5,19 +5,19 @@ use core::{
         AtomicBool,
         Ordering::{self, SeqCst},
     },
-    task::{Context, Poll, RawWaker, Waker},
+    task::{Context, Poll},
 };
 
 use futures_util::task::AtomicWaker;
 
-struct Flag {
+pub struct AsyncFlag {
     waker: AtomicWaker,
     set: AtomicBool,
 }
 
-impl Flag {
-    pub fn new() -> Flag {
-        Flag {
+impl AsyncFlag {
+    pub fn new() -> Self {
+        Self {
             waker: AtomicWaker::new(),
             set: AtomicBool::new(false),
         }
@@ -29,10 +29,10 @@ impl Flag {
     }
 }
 
-impl Future for Flag {
+impl Future for AsyncFlag {
     type Output = ();
 
-    fn poll(mut self: Pin<&mut Self>, lw: &mut Context<'_>) -> Poll<()> {
+    fn poll(self: Pin<&mut Self>, lw: &mut Context<'_>) -> Poll<()> {
         // Register **before** checking `set` to avoid a race condition
         // that would result in lost notifications.
         self.waker.register(lw.waker());

@@ -10,8 +10,10 @@ use crate::{
     devices::drivers::ahci_controller::{
         ahci_controller::AhciController,
         ahci_port::{
-            ahci_port_task, commands::read_connected_status::ReadConnectedStatusReply,
-            register::AhciPortRegister, AhciPortCommand,
+            ahci_port_task,
+            commands::{read::ReadCommand, read_connected_status::ReadConnectedStatusReply},
+            register::AhciPortRegister,
+            AhciPortCommand,
         },
         ahci_register::AhciRegister,
         registers::AhciPortInterruptStatusRegister,
@@ -98,9 +100,6 @@ async fn ahci_controller_task(mut controller: AhciController) {
             let (sender, receiver) = channel(10);
             task::start(ahci_port_task(port, receiver));
             ports.push((index, sender));
-
-            log::info!("SKIPPING REMAINING PORTS");
-            break;
         }
     }
 
@@ -129,9 +128,65 @@ async fn ahci_controller_task(mut controller: AhciController) {
             .await
             .expect("Failed to send ATA IDENTIFY command");
 
-        if let Some(reply) = receiver.recv().await {
-            log::info!(" -> IDENTIFY response: {reply:?}");
-        }
+        let Some(reply) = receiver.recv().await else {
+            panic!("failed to IDENTIFY drive");
+        };
+        log::info!(" -> IDENTIFY response: {reply:?}");
+
+        let identify_data = reply.ide_identify;
+
+        //     Read the master boot record
+        let (sender, receiver) = channel(1);
+        port.send(AhciPortCommand::Read(
+            ReadCommand {
+                start_sector: 0,
+                sector_count: 1,
+            },
+            sender,
+        ))
+        .await
+        .expect("Failed to send ATA READ command");
+
+        let Some(reply) = receiver.recv().await else {
+            panic!("READ failed");
+        };
+
+        log::info!(" -> READ response: {reply:X?}");
+
+        let mbr = reply.data[0];
+        let partition_entry_0 = &mbr[0x1BE..0x01CE];
+        log::info!("     -> Partition entry 0: {:?}", &partition_entry_0);
+        let start_sector_c =
+            partition_entry_0[0x03] as u64 + (((partition_entry_0[0x02] >> 6) as u64) << 8);
+        let start_sector_h = partition_entry_0[0x01] as u64;
+        let start_sector_s = (partition_entry_0[0x03] & 0b111111) as u64;
+
+        log::info!(
+            "     -> Start sector: CHS=({start_sector_c}, {start_sector_h}, {start_sector_s})"
+        );
+
+        let start_sector = (((start_sector_c * (identify_data.heads as u64)) + start_sector_h)
+            * (identify_data.sectors as u64))
+            + start_sector_s;
+
+        log::info!("     -> Start sector: LBA={start_sector}");
+
+        let (sender, receiver) = channel(1);
+        port.send(AhciPortCommand::Read(
+            ReadCommand {
+                start_sector,
+                sector_count: 1,
+            },
+            sender,
+        ))
+        .await
+        .expect("Failed to send ATA READ command");
+
+        let Some(reply) = receiver.recv().await else {
+            panic!("READ failed");
+        };
+
+        log::info!(" -> READ response: {reply:?}");
     }
 
     log::info!("AHCI controller started");
@@ -170,7 +225,7 @@ extern "x86-interrupt" fn ahci_irq_handler(_stack_frame: InterruptStackFrame) {
                         .port(i)
                         .expect("Interrupt for invalid port {i}");
 
-                    let mut pxis = AhciPortInterruptStatusRegister(
+                    let pxis = AhciPortInterruptStatusRegister(
                         port.read(AhciPortRegister::InterruptStatus),
                     );
 
@@ -178,13 +233,12 @@ extern "x86-interrupt" fn ahci_irq_handler(_stack_frame: InterruptStackFrame) {
                         log::info!("Event overflow on AHCI port {i}");
                     }
 
-                    pxis.clear_all();
                     port.write(AhciPortRegister::InterruptStatus, pxis.0);
                 }
             }
         }
 
-        ahci_controller.write(AhciRegister::InterruptStatus, 0);
+        ahci_controller.write(AhciRegister::InterruptStatus, interrupt_status);
     }
 
     // if let Ok(command_port) = KEYBOARD_COMMAND_PORT.try_get() {

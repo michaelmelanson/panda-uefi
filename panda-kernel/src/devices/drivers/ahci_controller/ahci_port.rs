@@ -13,7 +13,8 @@ use crate::{
         ahci_port::{
             ahci_command::AhciCommandHeader,
             ahci_physical_region_descriptor::AhciPhysicalRegionDescriptor,
-            commands::identify::IdentifyCommandReply, fis::HostToDeviceRegisterFis,
+            commands::{identify::IdentifyCommandReply, read::ReadCommandReply},
+            fis::HostToDeviceRegisterFis,
             ide::ide_identify::IdeIdentifyData,
         },
         ahci_wait_for_port_interrupt,
@@ -30,7 +31,10 @@ use self::{
     register::AhciPortRegister,
 };
 
-use alloc::{boxed::Box, vec};
+use alloc::{
+    boxed::Box,
+    vec::{self, Vec},
+};
 use ata::ATACommand;
 pub use commands::AhciPortCommand;
 use futures_util::{
@@ -154,7 +158,6 @@ pub async fn ahci_port_task(mut port: AhciPort, channel: Receiver<AhciPortComman
 
             AhciPortCommand::Identify(reply) => {
                 log::info!("Received IDENTIFY command");
-                let ata_command = ATACommand::Identify;
 
                 let result_data = [0u8; 512];
                 let result_data_addr =
@@ -166,20 +169,24 @@ pub async fn ahci_port_task(mut port: AhciPort, channel: Receiver<AhciPortComman
                 phys_region.set_data_base_addr_upper((result_data_addr >> 32) as u32);
                 phys_region.set_data_base_addr_lower(result_data_addr as u32);
                 phys_region.set_data_byte_count((result_data.len() - 1) as u32);
-                phys_region.set_interrupt_on_completion(true);
+                // phys_region.set_interrupt_on_completion(true);
+
+                let mut command_fis: HostToDeviceRegisterFis<[u8; 64]> =
+                    HostToDeviceRegisterFis::new([0; 64]);
+                command_fis.set_command(ATACommand::Identify.into());
+                command_fis.set_command_or_control(true);
 
                 perform_ata_command(
                     &mut port,
                     &mut command_tables,
                     &mut command_list_structure,
-                    ata_command,
+                    &command_fis.0,
                     &[phys_region],
                 )
                 .await;
 
                 let ide_identify =
                     unsafe { core::mem::transmute::<[u8; 512], IdeIdentifyData>(result_data) };
-                log::info!("IDE identify result: {ide_identify:?}");
                 assert_eq!(ide_identify.signature, 0x0040);
 
                 reply
@@ -187,7 +194,49 @@ pub async fn ahci_port_task(mut port: AhciPort, channel: Receiver<AhciPortComman
                     .await
                     .expect("Failed to send reply")
             }
-            AhciPortCommand::Read(command, reply) => todo!("read command"),
+
+            AhciPortCommand::Read(command, reply) => {
+                let mut data = Vec::new();
+                data.resize_with(command.sector_count as usize, || [0x55u8; 512]);
+
+                let phys_regions = data
+                    .iter()
+                    .map(|v| {
+                        let phys_addr =
+                            memory::virtual_to_physical(VirtAddr::new(v.as_ptr() as u64))
+                                .expect("could not translate result data to physical")
+                                .as_u64();
+
+                        let mut phys_region = AhciPhysicalRegionDescriptor([0u32; 4]);
+                        phys_region.set_data_base_addr_upper((phys_addr >> 32) as u32);
+                        phys_region.set_data_base_addr_lower(phys_addr as u32);
+                        phys_region.set_data_byte_count((v.len() - 1) as u32);
+                        phys_region
+                    })
+                    .collect::<Vec<_>>();
+
+                let mut command_fis: HostToDeviceRegisterFis<[u8; 64]> =
+                    HostToDeviceRegisterFis::new([0; 64]);
+                command_fis.set_command(ATACommand::ReadDmaExt.into());
+                command_fis.set_count(phys_regions.len() as u16);
+                command_fis.set_lba(command.start_sector + 1);
+                command_fis.set_command_or_control(true);
+                command_fis.set_device(0);
+
+                perform_ata_command(
+                    &mut port,
+                    &mut command_tables,
+                    &mut command_list_structure,
+                    &command_fis.0,
+                    &phys_regions,
+                )
+                .await;
+
+                reply
+                    .send(ReadCommandReply { data })
+                    .await
+                    .expect("Failed to send reply")
+            }
         }
     }
 }
@@ -207,7 +256,6 @@ fn find_free_slot(port: &AhciPort, command_list: &[AhciCommandTable; 32]) -> Opt
             continue;
         }
 
-        log::info!("slot {index} is free");
         return Some(index);
     }
 
@@ -218,7 +266,7 @@ async fn perform_ata_command(
     port: &mut AhciPort,
     command_tables: &mut [AhciCommandTable; 32],
     command_list_structure: &mut AhciCommandListStructure,
-    ata_command: ATACommand,
+    command_fis: &[u8; 64],
     phys_regions: &[AhciPhysicalRegionDescriptor<[u32; 4]>],
 ) {
     let Some(free_slot) = find_free_slot(&port, &command_tables) else {
@@ -226,26 +274,18 @@ async fn perform_ata_command(
     };
     log::info!("Free slot: {free_slot}");
 
-    log::info!(" -> Configured command list entries");
     let command_table = &mut command_tables[free_slot];
     let command_table_addr = command_table as *mut AhciCommandTable as u64;
     let command_table_addr = memory::virtual_to_physical(VirtAddr::new(command_table_addr))
         .expect("could not translate command tale address to physical")
         .as_u64();
-    log::info!(" -> Command table address: {command_table_addr:X}");
 
     let command_header = &mut command_list_structure[free_slot];
     command_header
         .set_command_table_descriptor_base_address_upper((command_table_addr >> 32) as u32);
     command_header.set_command_table_descriptor_base_address_lower(command_table_addr as u32);
 
-    let mut fis: HostToDeviceRegisterFis<[u8; 64]> =
-        HostToDeviceRegisterFis::new(command_table.command_fis);
-    fis.set_command(ata_command.into());
-    fis.set_command_or_control(true);
-    fis.set_device(0);
-    fis.set_pmport(0);
-    command_table.command_fis = fis.0;
+    command_table.command_fis = *command_fis;
     command_header.set_command_fis_length(1);
 
     assert!(phys_regions.len() <= 10);
@@ -267,11 +307,7 @@ async fn perform_ata_command(
 
     // the command should have completed by now.
     let pxci = port.read(AhciPortRegister::CommandIssue);
-    loop {
-        if pxci & (1 << free_slot) == 0 {
-            break;
-        }
-    }
+    assert_eq!(pxci & (1 << free_slot), 0, "command not completed");
 
     log::info!(
         "Command complete, error register is {:X}",

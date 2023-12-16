@@ -119,6 +119,9 @@ impl AhciPort {
     }
 
     pub fn enable_interrupts(&mut self) {
+        let pxis = self.read(AhciPortRegister::InterruptStatus);
+        self.write(AhciPortRegister::InterruptStatus, pxis);
+
         let mut pxie =
             AhciPortInterruptEnableRegister(self.read(AhciPortRegister::InterruptEnable));
         pxie.set_device_to_host_register_fis_interrupt_enable(true);

@@ -2,13 +2,13 @@ use alloc::vec::Vec;
 
 #[derive(Clone, Debug)]
 pub struct ReadCommand {
-    start_sector: u64,
-    sector_count: u64,
+    pub start_sector: u64,
+    pub sector_count: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct ReadCommandReply {
-    data: Vec<SectorData>,
+    pub data: Vec<SectorData>,
 }
 
-type SectorData = Vec<u8>;
+type SectorData = [u8; 512];
