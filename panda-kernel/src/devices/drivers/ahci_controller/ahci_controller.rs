@@ -6,7 +6,7 @@ use crate::{
 };
 
 use super::{
-    ahci_port::AhciPort,
+    ahci_port::port::AhciPort,
     ahci_register::AhciRegister,
     registers::{
         AhciBiosOsControlStatusRegister, AhciGlobalHbaControlRegister, AhciHbaCapabilitiesRegister,

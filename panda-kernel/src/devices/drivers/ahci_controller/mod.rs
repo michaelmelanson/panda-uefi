@@ -11,9 +11,10 @@ use crate::{
         ahci_controller::AhciController,
         ahci_port::{
             ahci_port_task,
-            commands::{read::ReadCommand, read_connected_status::ReadConnectedStatusReply},
+            commands::{
+                read::ReadCommand, read_connected_status::ReadConnectedStatusReply, AhciPortCommand,
+            },
             register::AhciPortRegister,
-            AhciPortCommand,
         },
         ahci_register::AhciRegister,
         registers::AhciPortInterruptStatusRegister,
@@ -28,7 +29,7 @@ use crate::{
 use self::registers::AhciPciCommandRegister;
 
 mod ahci_controller;
-mod ahci_port;
+pub mod ahci_port;
 mod ahci_register;
 mod registers;
 

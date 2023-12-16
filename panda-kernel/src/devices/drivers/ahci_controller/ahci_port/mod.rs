@@ -3,7 +3,7 @@ mod ahci_command_table;
 pub mod ahci_physical_region_descriptor;
 pub mod commands;
 mod fis;
-mod port;
+pub mod port;
 pub mod register;
 
 mod ide;
@@ -18,30 +18,21 @@ use crate::{
             ide::ide_identify::IdeIdentifyData,
         },
         ahci_wait_for_port_interrupt,
-        registers::{
-            AhciCommandAndStatusRegister, AhciPortSataStatusRegister, AhciPortTaskFileDataRegister,
-        },
+        registers::{AhciCommandAndStatusRegister, AhciPortSataStatusRegister},
     },
     memory,
 };
 
 use self::{
     ahci_command_table::AhciCommandTable,
-    commands::read_connected_status::ReadConnectedStatusReply, fis::AhciFis,
+    commands::{read_connected_status::ReadConnectedStatusReply, AhciPortCommand},
+    fis::AhciFis,
+    port::AhciPort,
     register::AhciPortRegister,
 };
 
-use alloc::{
-    boxed::Box,
-    vec::{self, Vec},
-};
+use alloc::{boxed::Box, vec::Vec};
 use ata::ATACommand;
-pub use commands::AhciPortCommand;
-use futures_util::{
-    future::{select, Either},
-    pin_mut,
-};
-pub use port::AhciPort;
 use thingbuf::mpsc::Receiver;
 use x86_64::VirtAddr;
 
